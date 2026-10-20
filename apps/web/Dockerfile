@@ -1,0 +1,16 @@
+FROM node:22-bookworm
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+ARG VITE_KEYCLOAK_URL=http://localhost:8080
+ARG VITE_KEYCLOAK_REALM=budget-management
+ARG VITE_KEYCLOAK_CLIENT=budget-web
+ARG VITE_API_URL=http://localhost:3001
+ENV VITE_KEYCLOAK_URL=$VITE_KEYCLOAK_URL
+ENV VITE_KEYCLOAK_REALM=$VITE_KEYCLOAK_REALM
+ENV VITE_KEYCLOAK_CLIENT=$VITE_KEYCLOAK_CLIENT
+ENV VITE_API_URL=$VITE_API_URL
+RUN npm run build
+EXPOSE 5173
+CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "5173"]

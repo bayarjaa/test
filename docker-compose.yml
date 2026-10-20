@@ -1,0 +1,112 @@
+services:
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${KC_DB_USER}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
+      POSTGRES_DB: ${KC_DB_NAME}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: start-dev --features=organization
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KC_DB_NAME}
+      KC_DB_USERNAME: ${KC_DB_USER}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/8080'"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 25s
+
+  keycloak-init:
+    image: node:22-bookworm
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD}
+      IAM_ADMIN_CLIENT_SECRET: ${IAM_ADMIN_CLIENT_SECRET}
+      WEB_ORIGIN: http://localhost:5173
+    volumes:
+      - ./infra/keycloak/init.mjs:/init.mjs:ro
+    command: node /init.mjs
+    restart: "no"
+
+  budget-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${BUDGET_DB_USER}
+      POSTGRES_PASSWORD: ${BUDGET_DB_PASSWORD}
+      POSTGRES_DB: ${BUDGET_DB_NAME}
+    volumes:
+      - budget-db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  budget-api:
+    build:
+      context: ./apps/api
+    depends_on:
+      budget-db:
+        condition: service_healthy
+      keycloak-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${BUDGET_DB_USER}:${BUDGET_DB_PASSWORD}@budget-db:5432/${BUDGET_DB_NAME}?schema=public
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE}
+      KEYCLOAK_CLIENT_ID: budget-iam-admin
+      KEYCLOAK_CLIENT_SECRET: ${IAM_ADMIN_CLIENT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+
+  budget-web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM}
+        VITE_KEYCLOAK_CLIENT: ${VITE_KEYCLOAK_CLIENT}
+        VITE_API_URL: ${VITE_API_URL}
+    depends_on:
+      - budget-api
+    ports:
+      - "5173:5173"
+
+volumes:
+  keycloak-db-data:
+  budget-db-data:

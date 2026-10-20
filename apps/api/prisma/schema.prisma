@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String           @id @default(uuid())
+  keycloakId           String           @unique
+  activeOrganizationId String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  budgets              BudgetDocument[] @relation("BudgetCreator")
+  accessRequests       AccessRequest[]  @relation("AccessRequester")
+  approvals            AccessApproval[]
+}
+
+enum BudgetStatus {
+  DRAFT
+  SUBMITTED
+  REVIEWED
+  APPROVED
+  RETURNED
+}
+
+model BudgetDocument {
+  id                 String                  @id @default(uuid())
+  organizationId     String
+  title              String
+  fiscalYear         Int
+  status             BudgetStatus            @default(DRAFT)
+  creatorId          String
+  creatorKeycloakId  String
+  creator            User                    @relation("BudgetCreator", fields: [creatorId], references: [id])
+  lines              BudgetLine[]
+  history            BudgetWorkflowHistory[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([organizationId, status])
+}
+
+model BudgetLine {
+  id          String         @id @default(uuid())
+  documentId  String
+  document    BudgetDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  description String
+  amount      Decimal        @db.Decimal(14, 2)
+}
+
+model BudgetWorkflowHistory {
+  id              String          @id @default(uuid())
+  documentId      String
+  document        BudgetDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  fromStatus      BudgetStatus?
+  toStatus        BudgetStatus
+  actorKeycloakId String
+  comment         String?
+  createdAt       DateTime        @default(now())
+}
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model AccessRequest {
+  id               String              @id @default(uuid())
+  organizationId   String
+  positionGroupId  String
+  targetKeycloakId String
+  requesterId      String
+  requester        User                @relation("AccessRequester", fields: [requesterId], references: [id])
+  riskLevel        String
+  status           AccessRequestStatus @default(PENDING)
+  expiresAt        DateTime?
+  comment          String?
+  approvals        AccessApproval[]
+  createdAt        DateTime            @default(now())
+
+  @@index([targetKeycloakId, positionGroupId, status])
+  @@index([organizationId, status])
+}
+
+model AccessApproval {
+  id         String        @id @default(uuid())
+  requestId  String
+  request    AccessRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approverId String
+  approver   User          @relation(fields: [approverId], references: [id])
+  decision   String
+  comment    String?
+  createdAt  DateTime      @default(now())
+}
+
+model AuditEvent {
+  id              String   @id @default(uuid())
+  actorKeycloakId String?
+  organizationId  String?
+  action          String
+  permission      String?
+  resourceType    String?
+  resourceId      String?
+  decision        String?
+  reason          String?
+  createdAt       DateTime @default(now())
+
+  @@index([actorKeycloakId, createdAt])
+}
